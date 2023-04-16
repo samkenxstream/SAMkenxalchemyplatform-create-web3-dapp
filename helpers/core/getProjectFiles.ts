@@ -2,81 +2,99 @@ import { selfDestroy } from "./selfDestroy.js";
 import { execSync } from "child_process";
 import path from "path";
 import fse from "fs-extra";
-import chalk from "chalk";
-import cliProgress from "cli-progress";
 import { setUpHardhat } from "../backend_helpers/setupHardhat.js";
-import { getComponents } from "./getComponents.js";
 import { createEnv } from "../utils/createEnv.js";
-import { copyFile } from "../utils/copyFile.js";
 import { cleanUpFiles } from "../utils/cleanUpFiles.js";
-import { Context } from "vm";
 import BuilderContext from "../../interfaces/BuilderContext.js";
-
-export const getProjectFiles = ({resolvedProjectPath, dappInfo}:BuilderContext) => {
+import { getDefaultRainbowkitChain } from "../utils/getDefaultRainbowkitChain.js";
+import { mkdir } from "../utils/mkdir.js";
+import fs, { existsSync } from "fs";
+import { gitIgnoreTemplate } from "../utils/gitignore.template.js";
+export const getProjectFiles = ({
+	resolvedProjectPath,
+	dappInfo,
+}: BuilderContext) => {
 	try {
 		process.chdir(resolvedProjectPath);
-		console.log(chalk.yellow("Downloading files..."));
-		const bar1 = new cliProgress.SingleBar(
-			{},
-			cliProgress.Presets.shades_classic
-		);
-		bar1.start(200, 0);
-		console.log("\n");
-		execSync(
-			`git clone --depth 1 ${"https://github.com/Eversmile12/create-web3-dapp"} .`
-		);
-		console.log("\n");
-		bar1.update(100);
-
-		console.log(chalk.yellow("\nCopying project files..."));
-
-		const template = path.join(
-			process.cwd(),
-			"templates",
-			dappInfo.isEVM
-				? "evm"
-				: "solana",
-			"core"
-		);
-		if (dappInfo.useBackend) {
-			fse.copySync(template, path.join(process.cwd(), "frontend"));
+		if (dappInfo.isTemplate) {
+			switch (dappInfo.template) {
+				case 0:
+					execSync(
+						`git clone --quiet ${"https://github.com/alchemyplatform/cw3d-nft-explorer.git"} .`
+					);
+					break;
+				case 1:
+					execSync(
+						`git clone --quiet ${"https://github.com/alchemyplatform/cw3d-donation-dapp"} .`
+					);
+					break;
+				default:
+					execSync(
+						`git clone --quiet ${"https://github.com/alchemyplatform/cw3d-evm-boilerplate"} .`
+					);
+					break;
+			}
 		} else {
-			fse.copySync(template, process.cwd());
-
-		}
-		if (dappInfo.modules) {
-			getComponents(
-				dappInfo.modules,
-				dappInfo.isEVM,
-				dappInfo.useBackend
+			execSync(
+				`git clone --quiet ${"https://github.com/alchemyplatform/cw3d-evm-boilerplate"} .`
 			);
-
 		}
 
-		bar1.update(200);
+		if (!dappInfo.useBackend) {
+			const frontend = path.join(process.cwd(), "frontend");
 
-		bar1.stop();
+			fse.copySync(frontend, process.cwd());
 
+			if (!existsSync(path.join("pages", "api")))
+				mkdir(path.join("pages", "api"));
+
+			fs.writeFileSync(".gitignore", gitIgnoreTemplate);
+		}
 		if (dappInfo.useBackend) {
-			console.log(
-				chalk.yellow(`Copying ${dappInfo.backendProvider} files...`)
+			if (!existsSync(path.join("pages", "api")))
+				mkdir(path.join("frontend", "pages", "api"));
+
+			fs.writeFileSync(
+				path.join("frontend", ".gitignore"),
+				gitIgnoreTemplate
 			);
+
 			switch (dappInfo.backendProvider) {
 				case "hardhat":
 					setUpHardhat(dappInfo, resolvedProjectPath);
 					break;
-
 				case "foundry":
 					break;
-				case "Anchor":
+				default:
 					break;
 			}
+			createEnv(
+				{ ...dappInfo.apiKeys, ETHERSCAN_API_KEY: "", PRIVATE_KEY: "" },
+				path.join(resolvedProjectPath, "backend"),
+				false
+			);
+			fs.writeFileSync(
+				path.join("backend", ".gitignore"),
+				gitIgnoreTemplate
+			);
 		}
 
-		createEnv({...dappInfo.apiKeys, ETHERSCAN_API_KEY: ""}, dappInfo.useBackend ? path.join(process.cwd(), "frontend") : process.cwd());
-		copyFile("utils", "README.md", process.cwd());
-		cleanUpFiles(dappInfo.useBackend)
-		console.log("Project files copied ✅");
+		createEnv(
+			{
+				...dappInfo.apiKeys,
+				ALCHEMY_NETWORK: dappInfo.testnet,
+				NEXT_PUBLIC_ALCHEMY_NETWORK: dappInfo.testnet,
+				NEXT_PUBLIC_DEFAULT_CHAIN: getDefaultRainbowkitChain(
+					dappInfo.testnet
+				),
+			},
+			dappInfo.useBackend
+				? path.join(process.cwd(), "frontend")
+				: process.cwd(),
+			true
+		);
+
+		cleanUpFiles(dappInfo.useBackend);
 	} catch (e) {
 		selfDestroy(e);
 	}
